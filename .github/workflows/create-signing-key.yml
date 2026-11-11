@@ -1,0 +1,77 @@
+name: Create signing key (ONE TIME ONLY)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type CREATE to generate a NEW signing key'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: create-android-signing-key
+  cancel-in-progress: false
+
+jobs:
+  create-key:
+    if: github.event.inputs.confirmation == 'CREATE'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Generate signing key
+        shell: bash
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.HECTOR1 }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${KEYSTORE_PASSWORD:-}" ]; then
+            echo "Missing HECTOR1 repository secret."
+            exit 1
+          fi
+
+          if [ "${#KEYSTORE_PASSWORD}" -lt 12 ]; then
+            echo "HECTOR1 must contain a strong password of at least 12 characters."
+            exit 1
+          fi
+
+          umask 077
+          EXPORT_DIR="$RUNNER_TEMP/signing-export"
+          mkdir -p "$EXPORT_DIR"
+
+          keytool -genkeypair \
+            -keystore "$EXPORT_DIR/iirco-release.jks" \
+            -storetype PKCS12 \
+            -storepass:env KEYSTORE_PASSWORD \
+            -keypass:env KEYSTORE_PASSWORD \
+            -alias iirco \
+            -keyalg RSA \
+            -keysize 3072 \
+            -validity 10000 \
+            -dname "CN=IIRCo"
+
+          base64 -w 0 "$EXPORT_DIR/iirco-release.jks" \
+            > "$EXPORT_DIR/HECTOR-base64.txt"
+
+      - name: Upload private key for backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: PRIVATE-signing-key-${{ github.run_id }}
+          path: ${{ runner.temp }}/signing-export/
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Clean runner copy
+        if: always()
+        shell: bash
+        run: rm -rf "$RUNNER_TEMP/signing-export"
