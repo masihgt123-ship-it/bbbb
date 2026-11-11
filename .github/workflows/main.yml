@@ -1,11 +1,7 @@
-name: Build IIRCo Android APK
+name: Build Signed IIRCo APK
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-      - master
 
 permissions:
   contents: read
@@ -19,10 +15,29 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Generate Android project and launcher icon
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Install Android build tools
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Create Android project
         shell: bash
         run: |
-          python - <<'PYTHON'
+          python3 - <<'PY'
           from pathlib import Path
           import shutil
           import textwrap
@@ -30,7 +45,7 @@ jobs:
           source = Path("index.html")
           if not source.is_file():
               raise SystemExit(
-                  "index.html must be in the repository root."
+                  "Missing index.html in the repository root."
               )
 
           project = Path("android-project")
@@ -51,7 +66,6 @@ jobs:
                       gradlePluginPortal()
                   }
               }
-
               dependencyResolutionManagement {
                   repositoriesMode.set(
                       RepositoriesMode.FAIL_ON_PROJECT_REPOS
@@ -61,7 +75,6 @@ jobs:
                       mavenCentral()
                   }
               }
-
               rootProject.name = 'IIRCoNDT'
               include ':app'
           """)
@@ -97,37 +110,60 @@ jobs:
                       sourceCompatibility JavaVersion.VERSION_17
                       targetCompatibility JavaVersion.VERSION_17
                   }
+
+                  buildTypes {
+                      release {
+                          minifyEnabled false
+                      }
+                  }
               }
           """)
 
           save("app/src/main/AndroidManifest.xml", """
               <?xml version="1.0" encoding="utf-8"?>
               <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-
-                  <!-- Offline app: no INTERNET permission. -->
-
                   <application
                       android:allowBackup="false"
                       android:label="IIRCo NDT"
                       android:icon="@drawable/ic_radiation"
-                      android:roundIcon="@drawable/ic_radiation"
                       android:supportsRtl="true"
                       android:usesCleartextTraffic="false"
                       android:theme="@android:style/Theme.Material.NoActionBar">
-
                       <activity
                           android:name=".MainActivity"
                           android:exported="true"
                           android:windowSoftInputMode="adjustResize">
-
                           <intent-filter>
-                              <action android:name="android.intent.action.MAIN"/>
-                              <category android:name="android.intent.category.LAUNCHER"/>
+                              <action android:name="android.intent.action.MAIN" />
+                              <category android:name="android.intent.category.LAUNCHER" />
                           </intent-filter>
-
                       </activity>
                   </application>
               </manifest>
+          """)
+
+          save("app/src/main/res/drawable/ic_radiation.xml", """
+              <vector xmlns:android="http://schemas.android.com/apk/res/android"
+                  android:width="108dp"
+                  android:height="108dp"
+                  android:viewportWidth="108"
+                  android:viewportHeight="108">
+                  <path
+                      android:fillColor="#FFD600"
+                      android:pathData="M0,0H108V108H0Z" />
+                  <path
+                      android:fillColor="#111111"
+                      android:pathData="M47,54a7,7 0,1 0,14 0a7,7 0,1 0,-14 0" />
+                  <path
+                      android:fillColor="#111111"
+                      android:pathData="M41,54L20,54A34,34 0,0 1,37,24.56L47.5,42.74A13,13 0,0 0,41,54Z" />
+                  <path
+                      android:fillColor="#111111"
+                      android:pathData="M60.5,42.74L71,24.56A34,34 0,0 1,88,54L67,54A13,13 0,0 0,60.5,42.74Z" />
+                  <path
+                      android:fillColor="#111111"
+                      android:pathData="M60.5,65.26L71,83.44A34,34 0,0 1,37,83.44L47.5,65.26A13,13 0,0 0,60.5,65.26Z" />
+              </vector>
           """)
 
           save(
@@ -141,12 +177,10 @@ jobs:
               import android.graphics.Color;
               import android.view.WindowInsets;
               import android.webkit.WebResourceRequest;
-              import android.webkit.WebResourceResponse;
               import android.webkit.WebSettings;
               import android.webkit.WebView;
               import android.webkit.WebViewClient;
               import android.widget.FrameLayout;
-              import java.io.ByteArrayInputStream;
 
               public class MainActivity extends Activity {
                   private static final String HOME =
@@ -186,7 +220,6 @@ jobs:
 
                       webView = new WebView(this);
                       webView.setBackgroundColor(Color.rgb(16, 24, 39));
-
                       root.addView(
                           webView,
                           new FrameLayout.LayoutParams(-1, -1)
@@ -221,25 +254,6 @@ jobs:
                           ) {
                               return !HOME.equals(url);
                           }
-
-                          @Override
-                          public WebResourceResponse shouldInterceptRequest(
-                              WebView view,
-                              WebResourceRequest request
-                          ) {
-                              String url = request.getUrl().toString();
-
-                              if (HOME.equals(url)
-                                  || url.startsWith("data:")) {
-                                  return null;
-                              }
-
-                              return new WebResourceResponse(
-                                  "text/plain",
-                                  "UTF-8",
-                                  new ByteArrayInputStream(new byte[0])
-                              );
-                          }
                       });
 
                       if (state == null
@@ -262,7 +276,6 @@ jobs:
                           ((FrameLayout) webView.getParent())
                               .removeView(webView);
                           webView.destroy();
-                          webView = null;
                       }
                       super.onDestroy();
                   }
@@ -270,136 +283,68 @@ jobs:
               """
           )
 
-          # Legacy launcher icon, also used as adaptive foreground.
-          save("app/src/main/res/drawable/ic_radiation.xml", """
-              <?xml version="1.0" encoding="utf-8"?>
-              <vector xmlns:android="http://schemas.android.com/apk/res/android"
-                  android:width="108dp"
-                  android:height="108dp"
-                  android:viewportWidth="108"
-                  android:viewportHeight="108">
-
-                  <path
-                      android:fillColor="#E9C023"
-                      android:pathData="M0,0H108V108H0Z"/>
-
-                  <group
-                      android:pivotX="54"
-                      android:pivotY="54"
-                      android:scaleX="0.75"
-                      android:scaleY="0.75">
-
-                      <path
-                          android:fillColor="#000000"
-                          android:pathData="M34,19.359
-                              A40,40 0,0 1,74,19.359
-                              L60,43.608
-                              A12,12 0,0 0,48,43.608Z"/>
-
-                      <path
-                          android:fillColor="#000000"
-                          android:pathData="M94,54
-                              A40,40 0,0 1,74,88.641
-                              L60,64.392
-                              A12,12 0,0 0,66,54Z"/>
-
-                      <path
-                          android:fillColor="#000000"
-                          android:pathData="M34,88.641
-                              A40,40 0,0 1,14,54
-                              L42,54
-                              A12,12 0,0 0,48,64.392Z"/>
-
-                      <path
-                          android:fillColor="#000000"
-                          android:pathData="M61,54
-                              A7,7 0,1 1,47,54
-                              A7,7 0,1 1,61,54Z"/>
-                  </group>
-              </vector>
-          """)
-
-          save(
-              "app/src/main/res/drawable/ic_launcher_background.xml",
-              """
-              <?xml version="1.0" encoding="utf-8"?>
-              <shape xmlns:android="http://schemas.android.com/apk/res/android"
-                  android:shape="rectangle">
-                  <solid android:color="#E9C023"/>
-              </shape>
-              """
-          )
-
-          # Android 8+ uses the adaptive version of the same drawable.
-          save(
-              "app/src/main/res/drawable-anydpi-v26/ic_radiation.xml",
-              """
-              <?xml version="1.0" encoding="utf-8"?>
-              <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-                  <background android:drawable="@drawable/ic_launcher_background"/>
-                  <foreground android:drawable="@drawable/ic_radiation_foreground"/>
-              </adaptive-icon>
-              """
-          )
-
-          foreground = (
-              project / "app/src/main/res/drawable/ic_radiation.xml"
-          )
-          shutil.copyfile(
-              foreground,
-              foreground.with_name("ic_radiation_foreground.xml")
-          )
-
           assets = project / "app/src/main/assets"
           assets.mkdir(parents=True, exist_ok=True)
           shutil.copyfile(source, assets / "index.html")
+          PY
 
-          # Remove the specific footer label if still present.
-          html_file = assets / "index.html"
-          html = html_file.read_text(encoding="utf-8")
-          html = html.replace("نسخهٔ آزمایشی", "محاسبات برآوردی")
-          html = html.replace("نسخه آزمایشی", "محاسبات برآوردی")
-          html_file.write_text(html, encoding="utf-8")
+      - name: Build release APK
+        run: gradle --no-daemon -p android-project :app:assembleRelease
 
-          # Validate generated XML before starting the Android build.
-          import xml.etree.ElementTree as ET
-          for xml_file in (project / "app/src/main").rglob("*.xml"):
-              ET.parse(xml_file)
-
-          print("Android project, offline HTML and icon are ready.")
-          PYTHON
-
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: platform-tools
-
-      - name: Install Android SDK packages
-        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
-
-      - name: Build APK
-        run: gradle --no-daemon -p android-project :app:assembleDebug
-
-      - name: Prepare APK download
+      - name: Sign and verify APK
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.HECTOR }}
+          KEYSTORE_PASSWORD: ${{ secrets.HECTOR1 }}
         run: |
-          cp \
-            android-project/app/build/outputs/apk/debug/app-debug.apk \
-            IIRCo-NDT-debug.apk
+          set -euo pipefail
+          umask 077
 
-      - name: Upload APK
+          if [ -z "${KEYSTORE_BASE64:-}" ] || \
+             [ -z "${KEYSTORE_PASSWORD:-}" ]; then
+            echo "Missing HECTOR or HECTOR1 secret."
+            exit 1
+          fi
+
+          KEYSTORE="$RUNNER_TEMP/iirco-release.jks"
+          TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          UNSIGNED="android-project/app/build/outputs/apk/release/app-release-unsigned.apk"
+          ALIGNED="$RUNNER_TEMP/iirco-aligned.apk"
+
+          printf '%s' "$KEYSTORE_BASE64" \
+            | base64 --decode > "$KEYSTORE"
+
+          "$TOOLS/zipalign" \
+            -P 16 -f 4 "$UNSIGNED" "$ALIGNED"
+
+          "$TOOLS/apksigner" sign \
+            --ks "$KEYSTORE" \
+            --ks-type PKCS12 \
+            --ks-key-alias iirco \
+            --ks-pass env:KEYSTORE_PASSWORD \
+            --key-pass env:KEYSTORE_PASSWORD \
+            --out IIRCo-NDT-release.apk \
+            "$ALIGNED"
+
+          "$TOOLS/apksigner" verify \
+            --verbose \
+            --print-certs \
+            IIRCo-NDT-release.apk
+
+          "$TOOLS/zipalign" \
+            -c -P 16 4 IIRCo-NDT-release.apk
+
+      - name: Remove temporary signing files
+        if: always()
+        shell: bash
+        run: |
+          rm -f \
+            "$RUNNER_TEMP/iirco-release.jks" \
+            "$RUNNER_TEMP/iirco-aligned.apk"
+
+      - name: Upload signed APK
         uses: actions/upload-artifact@v4
         with:
-          name: IIRCo-NDT-APK
-          path: IIRCo-NDT-debug.apk
+          name: IIRCo-NDT-Signed-Release
+          path: IIRCo-NDT-release.apk
           if-no-files-found: error
